@@ -110,48 +110,125 @@ genre_corr <- cor(genre_matrix)
 
 * Join the table with one title-genre per row from the previous section with the ratings table.
   * What is the highest rated genre? What is the lowest rated genre?
-  * Using stacked bar charts, investigate the proportions of different genres over time. Are any incresing or decreasing? Use factor functions to help make the plots easier to read.
+  * Using stacked bar charts, investigate the proportions of different genres over time. Are any incresing or decreasing? Use factor functions to help make the plots easier to read.top_known_for
 * Join the `title_basics` with the ratings table. Have the number of ratings changed over time (based on release year)? Display graphically but also answer with numerical results.
 * Join the names with the ratings and the principals table. 
   * Group by individual people, find the top ten people based on the median rating of the titles they appear in.
   * Find the proportions of genres for the the titles that include the top 10 rated principals.
   * Graph ratings against years. What trends do you see?
 * Create a table with one row for each person in the `name_basics` table and title they are known for. Join this to the ratings table to get the ratings of the "known for" films. Find the person (or people) who have the highest median known for rating.
-# Join tall titles with ratings
+
+#### Solution
+
+```{r}
+titles_tall <- titles_basics %>%
+  separate_rows(genres, sep = ",")
+```
+
 ```{r}
 titles_ratings <- titles_tall %>%
-  inner_join(ratings, by = "tconst")
+  inner_join(ratings, by = "tconst") %>%
+  filter(!is.na(genres), !is.na(averageRating))
 
-# Highest and Lowest rated genres
 genre_stats <- titles_ratings %>%
   group_by(genres) %>%
-  summarise(avg_rating = mean(averageRating, na.rm = TRUE), count = n()) %>%
-  filter(count > 100) %>%
-  arrange(desc(avg_rating))
+  summarise(
+    mean_rating = mean(averageRating, na.rm = TRUE),
+    n_titles = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n_titles >= 100) %>%
+  arrange(desc(mean_rating))
 
-# Join basics with ratings for time analysis
+genre_stats
+```
+
+After filtering out genres with very few titles, the highest rated genre appears at the top of the table, while the lowest rated genre appears at the bottom. This ensures the results are not driven by small sample sizes.
+
+```{r}
+genre_year <- titles_ratings %>%
+  filter(!is.na(startYear), startYear >= 1980) %>%
+  mutate(decade = floor(startYear / 10) * 10) %>%
+  count(decade, genres) %>%
+  group_by(decade) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+ggplot(genre_year, aes(x = factor(decade), y = prop, fill = genres)) +
+  geom_col(position = "fill") +
+  labs(title = "Genre Proportions Over Time",
+       x = "Decade",
+       y = "Proportion")
+```
+
+The stacked bar chart shows how the distribution of genres changes over time. Some genres become more dominant in recent decades while others decline.
+
+```{r}
 basics_ratings <- titles_basics %>%
-  inner_join(ratings, by = "tconst")
+  inner_join(ratings, by = "tconst") %>%
+  filter(!is.na(startYear), !is.na(numVotes))
 
-# Trend of number of ratings over time
 ggplot(basics_ratings, aes(x = startYear, y = numVotes)) +
   geom_point(alpha = 0.1) +
   scale_y_log10() +
-  geom_smooth(method = "gam")
+  geom_smooth() +
+  labs(title = "Votes over Time",
+       x = "Year",
+       y = "Number of Votes (log scale)")
+```
+The number of votes has generally increased over time. A log scale is used due to the heavy skew in the number of votes.
 
-# Join names, ratings, and principals
+```{r}
 big_join <- principals %>%
   inner_join(ratings, by = "tconst") %>%
   inner_join(name_basics, by = "nconst")
 
-# Top 10 people by median rating
 top_10_people <- big_join %>%
   group_by(primaryName) %>%
-  summarise(median_rating = median(averageRating), n = n()) %>%
-  filter(n >= 5) %>%
-  slice_max(median_rating, n = 10)
+  summarise(
+    median_rating = median(averageRating, na.rm = TRUE),
+    n_titles = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n_titles >= 5) %>%
+  arrange(desc(median_rating)) %>%
+  slice_head(n = 10)
 
-# "Known For" analysis
+top_10_people
+```
+I required each person to appear in at least five titles so that the median rating is not based on only one title.
+
+```{r}
+top_people_genres <- big_join %>%
+  semi_join(top_10_people, by = "primaryName") %>%
+  inner_join(titles_tall, by = "tconst") %>%
+  filter(!is.na(genres)) %>%
+  count(primaryName, genres) %>%
+  group_by(primaryName) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+ggplot(top_people_genres, aes(x = primaryName, y = prop, fill = genres)) +
+  geom_col(position = "fill") +
+  coord_flip() +
+  labs(
+    title = "Genre Proportions for Top 10 Rated Principals",
+    x = "Person",
+    y = "Proportion",
+    fill = "Genre"
+  )
+```
+This plot shows which genres are most common among the titles associated with the top ten rated principals. The proportions vary by person, suggesting that some highly rated principals are associated more strongly with certain genres.
+
+```{r}
+ggplot(basics_ratings, aes(x = startYear, y = averageRating)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth() +
+  labs(title = "Ratings vs Year")
+```
+Ratings vary across years, but the smoothing line helps show the overall trend. The pattern suggests that ratings are not constant over time, although individual titles still vary widely.
+
+```{r}
 known_for_tall <- name_basics %>%
   separate_rows(knownForTitles, sep = ",") %>%
   rename(tconst = knownForTitles) %>%
@@ -159,9 +236,36 @@ known_for_tall <- name_basics %>%
 
 top_known_for <- known_for_tall %>%
   group_by(primaryName) %>%
-  summarise(med_rating = median(averageRating)) %>%
-  slice_max(med_rating, n = 1)
-'''
+  summarise(
+    median_rating = median(averageRating, na.rm = TRUE),
+    n_titles = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n_titles >= 2) %>%
+  arrange(desc(median_rating))
+
+head(top_known_for, 10)
+```
+I required each person to have at least two known-for titles so that the median is not based on only one film.
+
+```{r}
+vote_year_summary <- basics_ratings %>%
+  group_by(startYear) %>%
+  summarise(
+    median_votes = median(numVotes, na.rm = TRUE),
+    mean_votes = mean(numVotes, na.rm = TRUE),
+    n_titles = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(startYear)
+
+head(vote_year_summary, 10)
+tail(vote_year_summary, 10)
+```
+
+The numerical summary shows the mean and median number of votes by release year. Comparing earlier and later years, the number of votes generally changes over time, with more recent titles often receiving more IMDb votes.
+
+
 
 ## Part V: Profiling and Parallel Processing
 
@@ -169,6 +273,73 @@ top_known_for <- known_for_tall %>%
 * Pick one or more of the previous problems and profile the performance of that piece. Write up your findings. If you see any opportunities to improve performance, feel fee to implement than and share the results.
 * Select a previous computation that could be improved using parallelization and implement a parallelization solution. Using `system.time` show that parallelization improves performance.
 * One task we performed involved counting items in strings separated by commas. Propose two different functions that could perform this taks. Compare them using bench marking. Which version would you recommend?
+
+#### Solution
+
+1.
+
+```{r}
+system.time({
+  titles_tall <- titles_basics %>%
+    separate_rows(genres, sep = ",")
+})
+```
+
+This step expands the dataset significantly and is one of the more expensive operations.
+
+2.
+
+```{r}
+library(bench)
+
+count_split <- function(x) {
+  lengths(strsplit(x, ","))
+}
+
+count_stringr <- function(x) {
+  str_count(x, ",") + 1
+}
+
+genre_strings <- titles_basics$genres %>%
+  na.omit()
+
+bench::mark(
+  split = count_split(genre_strings),
+  stringr = count_stringr(genre_strings),
+  iterations = 10,
+  check = FALSE
+)
+```
+
+The stringr method is typically faster since it avoids creating intermediate lists.
+
+3.
+
+```{r}
+library(parallel)
+
+genre_list <- split(titles_ratings, titles_ratings$genres)
+
+f <- function(df) {
+  mean(df$averageRating, na.rm = TRUE)
+}
+
+system.time({
+  res1 <- lapply(genre_list, f)
+})
+
+cl <- makeCluster(4)
+
+system.time({
+  res2 <- parLapply(cl, genre_list, f)
+})
+
+stopCluster(cl)
+```
+
+I compared a regular lapply version with a parallel parLapply version. For this sample dataset, the parallel version may or may not be faster because creating the cluster adds overhead. However, this computation is parallelizable because each genre group can be processed independently.
+
+
 
 ## Part VI: Shiny Applications
 
