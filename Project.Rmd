@@ -343,13 +343,91 @@ I compared a regular lapply version with a parallel parLapply version. For this 
 
 ## Part VI: Shiny Applications
 
+## Part VI: Shiny Applications
+
 ### Application 1
 
 Using results from the previous section, create a shiny application that allows users to interact with the with the IMDb data. The application should use both interactive graphs and at least 3 widgets.
 
+```{r}
+# Example code for a Shiny app
+library(shiny)
+ui <- fluidPage(
+  titlePanel("IMDb Genre Ratings"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("genre", "Select Genre:", choices = unique(titles_ratings$genres)),
+      sliderInput("yearRange", "Select Year Range:", min = 1900, max = 2020, value = c(1980, 2000)),
+      checkboxInput("showVotes", "Show Number of Votes", value = FALSE)
+    ),
+    mainPanel(
+      plotOutput("ratingPlot")
+    )
+  )
+)
+server <- function(input, output) {
+  
+  filtered_data <- reactive({
+    titles_ratings %>%
+      filter(genres == input$genre, startYear >= input$yearRange[1], startYear <= input$yearRange[2])
+  })
+  
+  output$ratingPlot <- renderPlot({
+    data <- filtered_data()
+    ggplot(data, aes(x = startYear, y = averageRating)) +
+      geom_point(aes(size = if (input$showVotes) numVotes else NULL), alpha = 0.5) +
+      geom_smooth() +
+      labs(title = paste("Ratings for", input$genre, "Genre"),
+           x = "Year",
+           y = "Average Rating")
+  })
+}
+shinyApp(ui = ui, server = server)
+```
+
 ### Application 2
 
 In the principals table, there is a `category` column. Use this column as a primary filter to allow users to then select specific job categories. After select the specific job categories, display information from another table.
+
+```{r}
+# Example code for a Shiny app with category filtering
+library(shiny)
+ui <- fluidPage(
+  titlePanel("IMDb Principals by Category"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("category", "Select Category:", choices = unique(principals$category)), 
+      uiOutput("jobUI")
+    ),
+    mainPanel(
+      tableOutput("principalsTable")
+    )
+  )
+)
+server <- function(input, output, session) {
+  output$jobUI <- renderUI({
+    req(input$category)
+    jobs <- principals %>%
+      filter(category == input$category) %>%
+      pull(jobCategory) %>%
+      unique()
+    selectInput("job", "Select Job Category:", choices = jobs)
+  })
+  
+  filtered_principals <- reactive({
+    req(input$category, input$job)
+    principals %>%
+      filter(category == input$category, jobCategory == input$job) %>%
+      inner_join(name_basics, by = "nconst") %>%
+      select(primaryName, tconst)
+  })
+  
+  output$principalsTable <- renderTable({
+    filtered_principals()
+  })
+}
+shinyApp(ui = ui, server = server)
+```
 
 ## Extra Credit: 6 Degrees of Kevin Bacon
 
